@@ -17,35 +17,34 @@ import csv
 from io import StringIO
 
 # Configure logging
+# Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Load environment variables
 MONGODB_USERNAME = os.getenv("MONGODB_USERNAME")
 MONGODB_PASSWORD = os.getenv("MONGODB_PASSWORD")
-MONGODB_URI = os.getenv("MONGODB_URI")
 MONGO_DB = os.getenv("MONGO_DB", "space_cargo")
 
-# Construct MongoDB URI if username/password are provided
-if MONGODB_USERNAME and MONGODB_PASSWORD:
-    MONGO_URI = f"mongodb+srv://{MONGODB_USERNAME}:{MONGODB_PASSWORD}@{MONGODB_URI}"
-else:
-    MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017")
+# Default MongoDB cluster URI
+MONGODB_URI = os.getenv("MONGODB_URI", "cluster0.38cb2.mongodb.net")
 
-# Connect to MongoDB securely
-try:
-    client = MongoClient(MONGO_URI, tlsCAFile=certifi.where())
-    db = client[MONGO_DB]
-    logger.info("Connected to MongoDB successfully")
-except Exception as e:
-    logger.error(f"Failed to connect to MongoDB: {e}")
-    raise HTTPException(status_code=500, detail="Database connection failed")
+# Construct MongoDB URI securely
+if MONGODB_USERNAME and MONGODB_PASSWORD:
+    MONGO_URI = f"mongodb+srv://{MONGODB_USERNAME}:{MONGODB_PASSWORD}@{MONGODB_URI}/?retryWrites=true&w=majority"
+else:
+    MONGO_URI = "mongodb://localhost:27017"
+
+# Connect to MongoDB
+client = MongoClient(MONGO_URI, tlsCAFile=certifi.where())
+db = client[MONGO_DB]
 
 # Collections
 cargo_collection = db["cargo"]
 containers_collection = db["containers"]
 log_collection = db["logs"]
 
+logger.info("Connected to MongoDB successfully.")
 
 
 # Initialize FastAPI
