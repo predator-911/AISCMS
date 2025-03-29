@@ -1,6 +1,6 @@
 import os
 from fastapi import FastAPI, HTTPException, UploadFile, File, Query
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 import pandas as pd
 from bson import ObjectId
@@ -21,17 +21,32 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Load environment variables
-MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017")
+MONGODB_USERNAME = os.getenv("MONGODB_USERNAME")
+MONGODB_PASSWORD = os.getenv("MONGODB_PASSWORD")
+MONGODB_URI = os.getenv("MONGODB_URI")
 MONGO_DB = os.getenv("MONGO_DB", "space_cargo")
 
-# Connect to MongoDB
-client = MongoClient(MONGO_URI, tlsCAFile=certifi.where())
-db = client[MONGO_DB]
+# Construct MongoDB URI if username/password are provided
+if MONGODB_USERNAME and MONGODB_PASSWORD:
+    MONGO_URI = f"mongodb+srv://{MONGODB_USERNAME}:{MONGODB_PASSWORD}@{MONGODB_URI}"
+else:
+    MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017")
+
+# Connect to MongoDB securely
+try:
+    client = MongoClient(MONGO_URI, tlsCAFile=certifi.where())
+    db = client[MONGO_DB]
+    logger.info("Connected to MongoDB successfully")
+except Exception as e:
+    logger.error(f"Failed to connect to MongoDB: {e}")
+    raise HTTPException(status_code=500, detail="Database connection failed")
 
 # Collections
 cargo_collection = db["cargo"]
 containers_collection = db["containers"]
 log_collection = db["logs"]
+
+
 
 # Initialize FastAPI
 app = FastAPI(
