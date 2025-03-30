@@ -22,23 +22,13 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Load environment variables
-MONGODB_USERNAME = os.getenv("MONGODB_USERNAME")
-MONGODB_PASSWORD = os.getenv("MONGODB_PASSWORD")
-MONGO_DB = os.getenv("MONGO_DB", "space_cargo")
+MONGO_USERNAME = os.getenv("MONGO_USERNAME")
+MONGO_PASSWORD = os.getenv("MONGO_PASSWORD")
+MONGO_DB = os.getenv("MONGO_DB")
 
-# Default MongoDB cluster URI
-MONGODB_URI = os.getenv("MONGODB_URI", "cluster0.38cb2.mongodb.net")
-
-# Construct MongoDB URI securely
-if MONGODB_USERNAME and MONGODB_PASSWORD:
-    MONGO_URI = f"mongodb+srv://{MONGODB_USERNAME}:{MONGODB_PASSWORD}@{MONGODB_URI}/?retryWrites=true&w=majority"
-else:
-    MONGO_URI = "mongodb://localhost:27017"
-
-# Connect to MongoDB
-client = MongoClient(MONGO_URI, tlsCAFile=certifi.where())
-db = client[MONGO_DB]
-
+# ✅ Connect to MongoDB Atlas
+uri = f"mongodb+srv://{MONGO_USERNAME}:{MONGO_PASSWORD}@cluster0.38cb2.mongodb.net/{MONGO_DB}?retryWrites=true&w=majority"
+client = MongoClient(uri, tlsCAFile=certifi.where())
 # Collections
 cargo_collection = db["cargo"]
 containers_collection = db["containers"]
