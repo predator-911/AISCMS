@@ -30,6 +30,7 @@ MONGO_DB = os.getenv("MONGO_DB")
 uri = f"mongodb+srv://{MONGO_USERNAME}:{MONGO_PASSWORD}@cluster0.38cb2.mongodb.net/{MONGO_DB}?retryWrites=true&w=majority"
 client = MongoClient(uri, tlsCAFile=certifi.where())
 # Collections
+db = client[MONGO_DB]
 cargo_collection = db["cargo"]
 containers_collection = db["containers"]
 log_collection = db["logs"]
