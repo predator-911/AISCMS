@@ -219,6 +219,24 @@ app = FastAPI(title="Space Cargo Management", version="1.0")
 # ---------------------------- Additional Endpoints ----------------------------
 
 # 1. Item Retrieval Endpoint
+@app.post("/api/add_cargo")
+async def add_cargo(item: Item):
+    item_dict = item.dict()
+    item_dict["expiryDate"] = (datetime.now() + timedelta(days=30)).isoformat() #Example date 30 days from now
+
+    item_dict["retrieval_count"] = 0  # Track how many times this cargo is retrieved
+    item_dict["created_at"] = datetime.now().isoformat()
+
+    inserted_item = items_col.insert_one(item_dict)
+
+    # Log the action
+    log_collection.insert_one({
+        "action": "add_cargo",
+        "item_id": str(inserted_item.inserted_id),
+        "timestamp": datetime.now().isoformat()
+    })
+
+    return {"item_id": str(inserted_item.inserted_id), "message": "Cargo item added successfully"}
 @app.post("/api/retrieve")
 async def retrieve_item(request: RetrieveRequest):
     """Handle item retrieval with usage tracking"""
