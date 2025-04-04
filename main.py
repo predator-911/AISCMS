@@ -24,8 +24,11 @@ logging.basicConfig(
 logger = logging.getLogger("space-cargo")
 
 # MongoDB Configuration
-MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017")
-DB_NAME = "space_cargo"
+
+MONGO_USERNAME = os.getenv("MONGO_USERNAME")
+MONGO_PASSWORD = os.getenv("MONGO_PASSWORD")
+MONGO_URI = f"mongodb+srv://{MONGO_USERNAME}:{MONGO_PASSWORD}@cluster0.38cb2.mongodb.net/{MONGO_DB}?retryWrites=true&w=majority"
+MONGO_DB = os.getenv("MONGO_DB")
 
 # ---------------------------- Data Models ----------------------------
 class ItemRotation(str, Enum):
@@ -172,7 +175,7 @@ class GuillotineBin:
 
 # ---------------------------- Database Setup ----------------------------
 client = MongoClient(MONGO_URI, tlsCAFile=certifi.where())
-db = client[DB_NAME]
+db = client[MONGO_DB]
 
 def get_collection(name: str) -> Collection:
     return db[name]
