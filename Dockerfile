@@ -1,25 +1,19 @@
 FROM ubuntu:22.04
 
-ENV DEBIAN_FRONTEND=noninteractive
-
-# Install system dependencies first
+# System dependencies
 RUN apt-get update && \
-    apt-get install -y python3 python3-pip build-essential && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+    apt-get install -y python3.10 python3-pip && \
+    apt-get clean
 
+# Python dependencies
+COPY requirements.txt .
+RUN pip3 install -r requirements.txt
+
+# Application code
+COPY . /app
 WORKDIR /app
 
-# Copy requirements first
-COPY requirements.txt .
-
-# Install Python packages with --no-cache-dir and force-reinstall numpy
-RUN pip3 install --no-cache-dir --upgrade pip && \
-    pip3 install --no-cache-dir --force-reinstall numpy==1.24.4 && \
-    pip3 install --no-cache-dir -r requirements.txt
-
-COPY . .
-
+# Expose API port
 EXPOSE 8000
 
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
