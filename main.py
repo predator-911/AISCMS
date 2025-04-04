@@ -27,8 +27,9 @@ logger = logging.getLogger("space-cargo")
 
 MONGO_USERNAME = os.getenv("MONGO_USERNAME")
 MONGO_PASSWORD = os.getenv("MONGO_PASSWORD")
-MONGO_URI = f"mongodb+srv://{MONGO_USERNAME}:{MONGO_PASSWORD}@cluster0.38cb2.mongodb.net/{MONGO_DB}?retryWrites=true&w=majority"
 MONGO_DB = os.getenv("MONGO_DB")
+MONGO_URI = f"mongodb+srv://{MONGO_USERNAME}:{MONGO_PASSWORD}@cluster0.38cb2.mongodb.net/{MONGO_DB}?retryWrites=true&w=majority"
+
 
 # ---------------------------- Data Models ----------------------------
 class ItemRotation(str, Enum):
