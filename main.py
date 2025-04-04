@@ -92,6 +92,29 @@ class ReturnPlanResponse(BaseModel):
     totalVolume: float
     steps: List[Dict]
 
+class RetrieveRequest(BaseModel):
+    itemId: str
+    userId: str
+    timestamp: str
+
+class PlaceRequest(BaseModel):
+    itemId: str
+    userId: str
+    timestamp: str
+    containerId: str
+    position: Dict
+
+class SimulationRequest(BaseModel):
+    numOfDays: Optional[int] = None
+    toTimestamp: Optional[str] = None
+    itemsToBeUsedPerDay: List[Dict[str, str]]
+
+class LogQuery(BaseModel):
+    startDate: str
+    endDate: str
+    itemId: Optional[str] = None
+    userId: Optional[str] = None
+    actionType: Optional[str] = None
 # ---------------------------- 3D Bin-Packing Core ----------------------------
 class GuillotineBin:
     def __init__(self, width: float, depth: float, height: float):
@@ -192,6 +215,197 @@ containers_col.create_index([("zone", ASCENDING)])
 
 # ---------------------------- FastAPI Setup ----------------------------
 app = FastAPI(title="Space Cargo Management", version="1.0")
+
+# ---------------------------- Additional Endpoints ----------------------------
+
+# 1. Item Retrieval Endpoint
+@app.post("/api/retrieve")
+async def retrieve_item(request: RetrieveRequest):
+    """Handle item retrieval with usage tracking"""
+    item = items_col.find_one({"itemId": request.itemId})
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+    
+    # Check usage limits
+    if item.get("usageLimit"):
+        if item["usageCount"] >= item["usageLimit"]:
+            items_col.update_one(
+                {"itemId": request.itemId},
+                {"$set": {"isWaste": True, "wasteReason": "Depleted"}}
+            )
+    
+    # Log retrieval action
+    log_entry = {
+        "timestamp": datetime.now().isoformat(),
+        "userId": request.userId,
+        "actionType": "retrieval",
+        "itemId": request.itemId,
+        "details": {
+            "fromContainer": item["containerId"],
+            "position": item["position"]
+        }
+    }
+    logs_col.insert_one(log_entry)
+    
+    return {"success": True}
+
+# 2. Manual Placement Endpoint
+@app.post("/api/place")
+async def manual_placement(request: PlaceRequest):
+    """Allow astronauts to manually place items"""
+    item = items_col.find_one({"itemId": request.itemId})
+    container = containers_col.find_one({"containerId": request.containerId})
+    
+    if not item or not container:
+        raise HTTPException(status_code=404, detail="Item/container not found")
+    
+    # Update item position
+    items_col.update_one(
+        {"itemId": request.itemId},
+        {"$set": {
+            "containerId": request.containerId,
+            "position": request.position
+        }}
+    )
+    
+    # Log placement
+    log_entry = {
+        "timestamp": request.timestamp,
+        "userId": request.userId,
+        "actionType": "placement",
+        "itemId": request.itemId,
+        "details": {
+            "toContainer": request.containerId,
+            "position": request.position
+        }
+    }
+    logs_col.insert_one(log_entry)
+    
+    return {"success": True}
+
+# 3. Waste Identification Endpoint
+@app.get("/api/waste/identify", response_model=List[WasteItem])
+async def identify_waste():
+    """Automatically identify waste items"""
+    current_time = datetime.now()
+    
+    # Find expired items
+    expired = list(items_col.find({
+        "expiryDate": {"$lt": current_time.isoformat()},
+        "isWaste": False
+    }))
+    
+    # Find depleted items
+    depleted = list(items_col.find({
+        "usageCount": {"$gte": "$usageLimit"},
+        "isWaste": False
+    }))
+    
+    # Mark as waste
+    for item in expired + depleted:
+        items_col.update_one(
+            {"_id": item["_id"]},
+            {"$set": {
+                "isWaste": True,
+                "wasteReason": "Expired" if "expiryDate" in item else "Depleted"
+            }}
+        )
+    
+    return JSONResponse([item | {"reason": "Expired"} for item in expired] + 
+                       [item | {"reason": "Depleted"} for item in depleted])
+
+# 4. Complete Undocking Endpoint
+@app.post("/api/waste/complete-undocking")
+async def complete_undocking(containerId: str):
+    """Finalize waste removal after undocking"""
+    result = items_col.delete_many({
+        "isWaste": True,
+        "containerId": containerId
+    })
+    return {"success": True, "itemsRemoved": result.deleted_count}
+
+# 5. Time Simulation Endpoint
+@app.post("/api/simulate/day")
+async def simulate_time(request: SimulationRequest):
+    """Advance time and update item statuses"""
+    current_date = datetime.fromisoformat(get_current_time())
+    
+    if request.toTimestamp:
+        new_date = datetime.fromisoformat(request.toTimestamp)
+    else:
+        new_date = current_date + timedelta(days=request.numOfDays)
+    
+    # Process daily expirations
+    expired_items = list(items_col.find({
+        "expiryDate": {"$lt": new_date.isoformat()},
+        "isWaste": False
+    }))
+    
+    # Process usage depletion
+    depleted_items = []
+    for day in request.itemsToBeUsedPerDay:
+        for usage in day.get("usages", []):
+            item = items_col.find_one({"itemId": usage["itemId"]})
+            if item:
+                new_count = item.get("usageCount", 0) + 1
+                items_col.update_one(
+                    {"_id": item["_id"]},
+                    {"$set": {"usageCount": new_count}}
+                )
+                if item["usageLimit"] and new_count >= item["usageLimit"]:
+                    depleted_items.append(item["itemId"])
+    
+    # Update system time
+    set_current_time(new_date.isoformat())
+    
+    return {
+        "success": True,
+        "newDate": new_date.isoformat(),
+        "expiredItems": [i["itemId"] for i in expired_items],
+        "depletedItems": depleted_items
+    }
+
+# 6. Import/Export Endpoints
+@app.post("/api/import/items")
+async def import_items(file: UploadFile = File(...)):
+    """Bulk import items from CSV"""
+    df = pd.read_csv(file.file)
+    items = df.to_dict(orient="records")
+    result = items_col.insert_many(items)
+    return {"success": True, "inserted": len(result.inserted_ids)}
+
+@app.post("/api/import/containers")
+async def import_containers(file: UploadFile = File(...)):
+    """Bulk import containers from CSV"""
+    df = pd.read_csv(file.file)
+    containers = df.to_dict(orient="records")
+    result = containers_col.insert_many(containers)
+    return {"success": True, "inserted": len(result.inserted_ids)}
+
+@app.get("/api/export/arrangement")
+async def export_arrangement():
+    """Export current storage layout"""
+    items = list(items_col.find({}, {"_id": 0}))
+    df = pd.DataFrame(items)
+    df.to_csv("arrangement.csv", index=False)
+    return FileResponse("arrangement.csv")
+
+# 7. Logging Endpoint
+@app.get("/api/logs", response_model=List[Dict])
+async def get_logs(query: LogQuery):
+    """Retrieve filtered logs"""
+    filter = {
+        "timestamp": {
+            "$gte": query.startDate,
+            "$lte": query.endDate
+        }
+    }
+    if query.itemId: filter["itemId"] = query.itemId
+    if query.userId: filter["userId"] = query.userId
+    if query.actionType: filter["actionType"] = query.actionType
+    
+    logs = list(logs_col.find(filter).sort("timestamp", DESCENDING))
+    return JSONResponse([{**log, "_id": str(log["_id"])} for log in logs])
 
 @app.post("/api/placement", response_model=PlacementResponse)
 async def placement_recommendation(request: PlacementRequest):
