@@ -130,7 +130,7 @@ class GuillotineBin:
             iw, id_, ih = item.depth, item.height, item.width
         elif rotation == ItemRotation.HWD:
             iw, id_, ih = item.height, item.width, item.depth
-        else:  rotation == ItemRotation.HDW
+        else:  
             iw, id_, ih = item.height, item.depth, item.width
 
         # Find best fit (minimize depth for accessibility)
