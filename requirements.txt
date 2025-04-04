@@ -1,5 +1,10 @@
-fastapi>=0.95.2
-uvicorn>=0.22.0
-pymongo>=4.3.3
-pandas>=2.0.3
-python-multipart>=0.0.6
+fastapi
+uvicorn
+pymongo
+certifi
+scikit-learn
+networkx
+python-dotenv
+nest_asyncio
+pandas
+python-multipart
