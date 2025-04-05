@@ -5,7 +5,7 @@ from typing import List, Dict, Optional, Tuple
 from fastapi import FastAPI, HTTPException, UploadFile, File, Query, Depends
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field , validator 
 from io import StringIO
 import pandas as pd
 import numpy as np
