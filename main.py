@@ -15,7 +15,18 @@ import certifi
 from enum import Enum
 from heapq import heappush, heappop
 import uvicorn
+# Add custom JSON response handler
+from fastapi.responses import JSONResponse
+from fastapi.encoders import jsonable_encoder
 
+def custom_json_encoder(obj):
+    if isinstance(obj, float):
+        if np.isnan(obj) or np.isinf(obj):
+            return None
+    return obj
+
+app = FastAPI(title="Space Cargo Management", version="1.0")
+app.json_encoder = custom_json_encoder
 # ---------------------------- Configuration ----------------------------
 logging.basicConfig(
     level=logging.INFO,
@@ -67,12 +78,19 @@ class Item(BaseModel):
     usageLimit: Optional[int] = None
     preferredZone: str
 
+# Update the Container model
 class Container(BaseModel):
     containerId: str
-    zone: str
-    width: float
-    depth: float
-    height: float
+    zone: str = "General"
+    width: float = Field(..., gt=0)
+    depth: float = Field(..., gt=0)
+    height: float = Field(..., gt=0)
+    
+    @validator('*', pre=True)
+    def replace_nan(cls, value):
+        if isinstance(value, float) and (np.isnan(value) or np.isinf(value)):
+            return 0.0
+        return value
 
 class PlacementRequest(BaseModel):
     items: List[Item]
@@ -266,11 +284,22 @@ async def startup_db_client():
 # ---------------------------- API Endpoints ----------------------------
 
 # NEW ENDPOINT: Get all items
+# Update the /api/items endpoint
 @app.get("/api/items")
 async def get_all_items(items_col: Collection = Depends(get_items_collection)):
     """Retrieve all cargo items"""
     try:
+        # Convert ObjectId and handle NaN values
         items = list(items_col.find({}, {"_id": 0}))
+        
+        # Sanitize numeric values
+        for item in items:
+            for field in ['width', 'depth', 'height', 'mass']:
+                if field in item and not isinstance(item[field], (int, float)):
+                    item[field] = 0.0
+                elif field in item and (np.isnan(item[field]) or np.isinf(item[field]):
+                    item[field] = 0.0
+        
         return {"success": True, "items": items, "count": len(items)}
     except Exception as e:
         logger.error(f"Failed to retrieve items: {e}")
@@ -523,6 +552,7 @@ async def simulate_time(
         "depletedItems": depleted_items
     }
 
+# Update the import_items endpoint
 @app.post("/api/import/items")
 async def import_items(
     file: UploadFile = File(...),
@@ -532,21 +562,32 @@ async def import_items(
     try:
         contents = await file.read()
         df = pd.read_csv(StringIO(contents.decode('utf-8')))
+        
+        # Validate numeric columns
+        numeric_cols = ['width', 'depth', 'height', 'mass', 'priority']
+        for col in numeric_cols:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+        
+        # Validate required fields
+        if 'itemId' not in df.columns:
+            raise ValueError("CSV missing required 'itemId' column")
+            
         items = df.to_dict(orient="records")
         
-        # Set default values
+        # Set safe defaults
         for item in items:
-            item["isWaste"] = False
-            item["usageCount"] = 0
-            item["retrieval_count"] = 0
-            item["created_at"] = datetime.now().isoformat()
+            item.setdefault("priority", 50)
+            item.setdefault("isWaste", False)
+            item.setdefault("usageCount", 0)
+            item.setdefault("retrieval_count", 0)
+            item.setdefault("preferredZone", "General")
         
         result = items_col.insert_many(items)
         return {"success": True, "inserted": len(result.inserted_ids)}
     except Exception as e:
         logger.error(f"Import error: {e}")
         raise HTTPException(status_code=400, detail=f"Import failed: {str(e)}")
-
 @app.post("/api/import/containers")
 async def import_containers(
     file: UploadFile = File(...),
@@ -818,46 +859,52 @@ async def search_item(
         "retrievalSteps": steps
     }
 
+# Update the generate_return_plan endpoint
 @app.post("/api/waste/return-plan")
 async def generate_return_plan(
     maxWeight: float,
     items_col: Collection = Depends(get_items_collection)
 ):
     """Generate optimal waste return plan using knapsack algorithm"""
-    waste_items = list(items_col.find({"isWaste": True}))
-    
-    if not waste_items:
-        return {"success": True, "totalWeight": 0, "totalVolume": 0, "steps": []}
-    
-    # Convert weight to integer for DP (multiplied by 1000 for precision)
-    max_weight_int = int(maxWeight * 1000)
-    items_for_knapsack = []
-    
-    for item in waste_items:
-        # Skip items with missing data
-        if not all(k in item for k in ["mass", "position"]):
-            continue
-            
-        # Calculate volume
-        try:
-            volume = (
-                (item["position"]["end"]["width"] - item["position"]["start"]["width"]) *
-                (item["position"]["end"]["depth"] - item["position"]["start"]["depth"]) *
-                (item["position"]["end"]["height"] - item["position"]["start"]["height"])
-            )
-        except (KeyError, TypeError):
-            volume = 0
-            
-        items_for_knapsack.append({
-            "itemId": item["itemId"],
-            "name": item.get("name", "Unknown"),
-            "mass": item["mass"],
-            "mass_int": int(item["mass"] * 1000),
-            "volume": volume,
-            "containerId": item.get("containerId", "unknown"),
-            "reason": item.get("wasteReason", "Unknown"),
-            "position": item.get("position", {})
-        })
+    try:
+        waste_items = list(items_col.find({"isWaste": True}))
+        
+        if not waste_items:
+            return {"success": True, "totalWeight": 0, "totalVolume": 0, "steps": []}
+        
+        # Validate and sanitize item data
+        valid_items = []
+        for item in waste_items:
+            try:
+                # Ensure numeric values
+                mass = float(item.get("mass", 0))
+                if np.isnan(mass) or np.isinf(mass) or mass < 0:
+                    mass = 0
+                
+                # Calculate volume safely
+                pos = item.get("position", {})
+                start = pos.get("start", {})
+                end = pos.get("end", {})
+                
+                width = float(end.get("width", 0)) - float(start.get("width", 0))
+                depth = float(end.get("depth", 0)) - float(start.get("depth", 0))
+                height = float(end.get("height", 0)) - float(start.get("height", 0))
+                
+                volume = abs(width * depth * height)
+                
+                valid_items.append({
+                    "itemId": item["itemId"],
+                    "name": item.get("name", "Unknown"),
+                    "mass": mass,
+                    "volume": volume,
+                    "containerId": item.get("containerId", "unknown"),
+                    "reason": item.get("wasteReason", "Unknown")
+                })
+            except Exception as e:
+                logger.warning(f"Skipping invalid item {item.get('itemId')}: {str(e)}")
+                continue
+
+        # Rest of the knapsack algorithm...
     
     # Dynamic programming for the knapsack problem
     dp = [0] * (max_weight_int + 1)
