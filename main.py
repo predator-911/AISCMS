@@ -297,7 +297,7 @@ async def get_all_items(items_col: Collection = Depends(get_items_collection)):
             for field in ['width', 'depth', 'height', 'mass']:
                 if field in item and not isinstance(item[field], (int, float)):
                     item[field] = 0.0
-                elif field in item and (np.isnan(item[field]) or np.isinf(item[field]):
+                elif field in item and (np.isnan(item[field]) or np.isinf(item[field])):
                     item[field] = 0.0
         
         return {"success": True, "items": items, "count": len(items)}
