@@ -868,78 +868,82 @@ async def generate_return_plan(
     """Generate optimal waste return plan using knapsack algorithm"""
     try:
         waste_items = list(items_col.find({"isWaste": True}))
-        
+
         if not waste_items:
             return {"success": True, "totalWeight": 0, "totalVolume": 0, "steps": []}
-        
+
+        # Helper function for safe float conversion
+        def safe_float(val):
+            try:
+                f = float(val)
+                return 0.0 if np.isnan(f) or np.isinf(f) else f
+            except:
+                return 0.0
+
         # Validate and sanitize item data
         valid_items = []
         for item in waste_items:
             try:
-                # Ensure numeric values
-                mass = float(item.get("mass", 0))
-                if np.isnan(mass) or np.isinf(mass) or mass < 0:
-                    mass = 0
+                mass = safe_float(item.get("mass", 0))
                 
-                # Calculate volume safely
                 pos = item.get("position", {})
                 start = pos.get("start", {})
                 end = pos.get("end", {})
-                
-                width = float(end.get("width", 0)) - float(start.get("width", 0))
-                depth = float(end.get("depth", 0)) - float(start.get("depth", 0))
-                height = float(end.get("height", 0)) - float(start.get("height", 0))
-                
+
+                width = safe_float(end.get("width")) - safe_float(start.get("width"))
+                depth = safe_float(end.get("depth")) - safe_float(start.get("depth"))
+                height = safe_float(end.get("height")) - safe_float(start.get("height"))
+
                 volume = abs(width * depth * height)
-                
+
                 valid_items.append({
-                    "itemId": item["itemId"],
+                    "itemId": item.get("itemId"),
                     "name": item.get("name", "Unknown"),
                     "mass": mass,
                     "volume": volume,
                     "containerId": item.get("containerId", "unknown"),
                     "reason": item.get("wasteReason", "Unknown")
                 })
-            except Exception as e:
-                logger.warning(f"Skipping invalid item {item.get('itemId')}: {str(e)}")
-                continue
+            except:
+                continue  # Skip invalid items
 
-        # Rest of the knapsack algorithm...
-    
-    # Dynamic programming for the knapsack problem
-    dp = [0] * (max_weight_int + 1)
-    selected_items = [[] for _ in range(max_weight_int + 1)]
-    
-    for item in items_for_knapsack:
-        for w in range(max_weight_int, item["mass_int"] - 1, -1):
-            if dp[w - item["mass_int"]] + item["volume"] > dp[w]:
-                dp[w] = dp[w - item["mass_int"]] + item["volume"]
-                selected_items[w] = selected_items[w - item["mass_int"]] + [item]
-    
-    # Get the best solution
-    best_solution = selected_items[max_weight_int]
-    total_weight = sum(item["mass"] for item in best_solution)
-    total_volume = sum(item["volume"] for item in best_solution)
-    
-    # Generate return steps
-    steps = []
-    for idx, item in enumerate(best_solution, 1):
-        steps.append({
-            "step": idx,
-            "action": "remove_waste",
-            "itemId": item["itemId"],
-            "itemName": item["name"],
-            "containerId": item["containerId"],
-            "reason": item["reason"],
-            "position": item["position"]
-        })
-    
-    return {
-        "success": True,
-        "totalWeight": total_weight,
-        "totalVolume": total_volume,
-        "steps": steps
-    }
+        # Knapsack algorithm (maximize volume under maxWeight constraint)
+        n = len(valid_items)
+        W = int(maxWeight * 100)  # Scale to avoid floating point precision issues
+        dp = [[0] * (W + 1) for _ in range(n + 1)]
+
+        for i in range(1, n + 1):
+            item = valid_items[i - 1]
+            weight = int(item["mass"] * 100)
+            value = item["volume"]
+            for w in range(W + 1):
+                if weight <= w:
+                    dp[i][w] = max(dp[i - 1][w], dp[i - 1][w - weight] + value)
+                else:
+                    dp[i][w] = dp[i - 1][w]
+
+        # Backtrack to find selected items
+        w = W
+        selected = []
+        total_weight = 0.0
+        total_volume = 0.0
+        for i in range(n, 0, -1):
+            if dp[i][w] != dp[i - 1][w]:
+                item = valid_items[i - 1]
+                selected.append(item)
+                total_weight += item["mass"]
+                total_volume += item["volume"]
+                w -= int(item["mass"] * 100)
+
+        return {
+            "success": True,
+            "totalWeight": total_weight,
+            "totalVolume": total_volume,
+            "steps": selected
+        }
+
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
 @app.get("/api/metrics/usage")
 async def get_usage_metrics(
