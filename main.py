@@ -6,6 +6,7 @@ from fastapi import FastAPI, HTTPException, UploadFile, File, Query, Depends
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+from io import StringIO
 import pandas as pd
 import numpy as np
 from pymongo import MongoClient, ASCENDING, DESCENDING
@@ -508,7 +509,7 @@ async def import_items(
     """Bulk import items from CSV"""
     try:
         contents = await file.read()
-        df = pd.read_csv(pd.io.StringIO(contents.decode('utf-8')))
+        df = pd.read_csv(StringIO(contents.decode('utf-8')))
         items = df.to_dict(orient="records")
         
         # Set default values
@@ -532,7 +533,7 @@ async def import_containers(
     """Bulk import containers from CSV"""
     try:
         contents = await file.read()
-        df = pd.read_csv(pd.io.StringIO(contents.decode('utf-8')))
+        df = pd.read_csv(StringIO(contents.decode('utf-8')))
         containers = df.to_dict(orient="records")
         result = containers_col.insert_many(containers)
         return {"success": True, "inserted": len(result.inserted_ids)}
