@@ -852,12 +852,16 @@ async def generate_return_plan(
     total_volume = sum(item["volume"] for item in selected)
     
     # Generate return steps
-    "step": idx,
+    steps = []
+    for idx, item in enumerate(selected, 1):
+        steps.append({
+            "step": idx,
             "itemId": item["itemId"],
-            "name": item.get("name", "Unknown Item"),
+            "name": item["name"],
             "mass": item["mass"],
-            "containerId": item.get("containerId", "unknown"),
-            "action": "package"
+            "containerId": item["containerId"],
+            "reason": item["reason"],
+            "position": item["position"]
         })
     
     return {
