@@ -265,6 +265,28 @@ async def startup_db_client():
 
 # ---------------------------- API Endpoints ----------------------------
 
+# NEW ENDPOINT: Get all items
+@app.get("/api/items")
+async def get_all_items(items_col: Collection = Depends(get_items_collection)):
+    """Retrieve all cargo items"""
+    try:
+        items = list(items_col.find({}, {"_id": 0}))
+        return {"success": True, "items": items, "count": len(items)}
+    except Exception as e:
+        logger.error(f"Failed to retrieve items: {e}")
+        raise HTTPException(status_code=500, detail=f"Error retrieving items: {str(e)}")
+
+# NEW ENDPOINT: Get all containers
+@app.get("/api/containers")
+async def get_all_containers(containers_col: Collection = Depends(get_containers_collection)):
+    """Retrieve all containers"""
+    try:
+        containers = list(containers_col.find({}, {"_id": 0}))
+        return {"success": True, "containers": containers, "count": len(containers)}
+    except Exception as e:
+        logger.error(f"Failed to retrieve containers: {e}")
+        raise HTTPException(status_code=500, detail=f"Error retrieving containers: {str(e)}")
+
 @app.post("/api/add_cargo")
 async def add_cargo(
     item: Item,
@@ -557,22 +579,30 @@ async def export_arrangement(items_col: Collection = Depends(get_items_collectio
         logger.error(f"Export error: {e}")
         raise HTTPException(status_code=500, detail=f"Export failed: {str(e)}")
 
+# FIXED ENDPOINT: Updated to provide default date range if not specified
 @app.get("/api/logs")
 async def get_logs(
-    startDate: str,
-    endDate: str,
+    startDate: Optional[str] = None,
+    endDate: Optional[str] = None,
     itemId: Optional[str] = None,
     userId: Optional[str] = None,
     actionType: Optional[str] = None,
     logs_col: Collection = Depends(get_logs_collection)
 ):
-    """Retrieve filtered logs"""
+    """Retrieve filtered logs with default date range if not provided"""
+    # Set default date range if not provided (last 7 days)
+    if not endDate:
+        endDate = datetime.now().isoformat()
+    if not startDate:
+        startDate = (datetime.now() - timedelta(days=7)).isoformat()
+    
     filter = {
         "timestamp": {
             "$gte": startDate,
             "$lte": endDate
         }
     }
+    
     if itemId: filter["itemId"] = itemId
     if userId: filter["userId"] = userId
     if actionType: filter["actionType"] = actionType
@@ -583,7 +613,7 @@ async def get_logs(
     for log in logs:
         log["_id"] = str(log["_id"])
     
-    return logs
+    return {"success": True, "logs": logs, "count": len(logs)}
 
 @app.post("/api/placement", response_model=PlacementResponse)
 async def placement_recommendation(
@@ -824,7 +854,9 @@ async def generate_return_plan(
             "mass": item["mass"],
             "mass_int": int(item["mass"] * 1000),
             "volume": volume,
-            "containerId": item.get("containerId", "unknown")
+            "containerId": item.get("containerId", "unknown"),
+            "reason": item.get("wasteReason", "Unknown"),
+            "position": item.get("position", {})
         })
     
     # Dynamic programming for the knapsack problem
@@ -832,34 +864,24 @@ async def generate_return_plan(
     selected_items = [[] for _ in range(max_weight_int + 1)]
     
     for item in items_for_knapsack:
-        mass_int = item["mass_int"]
-        
-        # Skip items too heavy for the knapsack
-        if mass_int > max_weight_int:
-            continue
-            
-        for w in range(max_weight_int, mass_int - 1, -1):
-            new_value = dp[w - mass_int] + mass_int
-            if new_value > dp[w]:
-                dp[w] = new_value
-                selected_items[w] = selected_items[w - mass_int] + [item["itemId"]]
+        for w in range(max_weight_int, item["mass_int"] - 1, -1):
+            if dp[w - item["mass_int"]] + item["volume"] > dp[w]:
+                dp[w] = dp[w - item["mass_int"]] + item["volume"]
+                selected_items[w] = selected_items[w - item["mass_int"]] + [item]
     
-    # Get the optimal solution
-    selected_ids = selected_items[max_weight_int]
-    selected = [item for item in items_for_knapsack if item["itemId"] in selected_ids]
-    
-    # Calculate totals
-    total_weight = sum(item["mass"] for item in selected)
-    total_volume = sum(item["volume"] for item in selected)
+    # Get the best solution
+    best_solution = selected_items[max_weight_int]
+    total_weight = sum(item["mass"] for item in best_solution)
+    total_volume = sum(item["volume"] for item in best_solution)
     
     # Generate return steps
     steps = []
-    for idx, item in enumerate(selected, 1):
+    for idx, item in enumerate(best_solution, 1):
         steps.append({
             "step": idx,
+            "action": "remove_waste",
             "itemId": item["itemId"],
-            "name": item["name"],
-            "mass": item["mass"],
+            "itemName": item["name"],
             "containerId": item["containerId"],
             "reason": item["reason"],
             "position": item["position"]
@@ -872,7 +894,178 @@ async def generate_return_plan(
         "steps": steps
     }
 
+@app.get("/api/metrics/usage")
+async def get_usage_metrics(
+    items_col: Collection = Depends(get_items_collection)
+):
+    """Get usage statistics for dashboard"""
+    # Count total items
+    total_items = items_col.count_documents({})
+    
+    # Count waste items
+    waste_items = items_col.count_documents({"isWaste": True})
+    
+    # Count by priority
+    priority_high = items_col.count_documents({"priority": {"$gte": 75}})
+    priority_medium = items_col.count_documents({"priority": {"$gte": 25, "$lt": 75}})
+    priority_low = items_col.count_documents({"priority": {"$lt": 25}})
+    
+    # Most frequently retrieved items
+    top_retrieved = list(items_col.find({}).sort("retrieval_count", DESCENDING).limit(5))
+    top_retrieved = [{
+        "itemId": item["itemId"],
+        "name": item.get("name", "Unknown"),
+        "count": item.get("retrieval_count", 0)
+    } for item in top_retrieved]
+    
+    # Items nearing expiry (within 7 days)
+    current_time = datetime.now()
+    expiry_threshold = (current_time + timedelta(days=7)).isoformat()
+    expiring_soon = list(items_col.find({
+        "expiryDate": {"$lt": expiry_threshold, "$gt": current_time.isoformat()},
+        "isWaste": False
+    }))
+    expiring_soon = [{
+        "itemId": item["itemId"],
+        "name": item.get("name", "Unknown"),
+        "expiryDate": item.get("expiryDate")
+    } for item in expiring_soon]
+    
+    return {
+        "success": True,
+        "totalItems": total_items,
+        "wasteItems": waste_items,
+        "itemsByPriority": {
+            "high": priority_high,
+            "medium": priority_medium,
+            "low": priority_low
+        },
+        "topRetrieved": top_retrieved,
+        "expiringSoon": expiring_soon
+    }
+
+@app.get("/api/metrics/storage")
+async def get_storage_metrics(
+    items_col: Collection = Depends(get_items_collection),
+    containers_col: Collection = Depends(get_containers_collection)
+):
+    """Get storage utilization metrics"""
+    # Get all containers
+    containers = list(containers_col.find({}))
+    container_stats = {}
+    
+    for container in containers:
+        container_id = container["containerId"]
+        container_volume = container["width"] * container["depth"] * container["height"]
+        
+        # Find items in this container
+        items_in_container = list(items_col.find({"containerId": container_id}))
+        used_volume = 0
+        
+        for item in items_in_container:
+            if "position" in item:
+                item_width = item["position"]["end"]["width"] - item["position"]["start"]["width"]
+                item_depth = item["position"]["end"]["depth"] - item["position"]["start"]["depth"]
+                item_height = item["position"]["end"]["height"] - item["position"]["start"]["height"]
+                used_volume += item_width * item_depth * item_height
+        
+        utilization_pct = (used_volume / container_volume) * 100 if container_volume > 0 else 0
+        
+        container_stats[container_id] = {
+            "totalVolume": container_volume,
+            "usedVolume": used_volume,
+            "utilizationPercentage": round(utilization_pct, 2),
+            "zone": container.get("zone", "Unknown"),
+            "itemCount": len(items_in_container)
+        }
+    
+    # Calculate zone statistics
+    zone_stats = {}
+    for container in containers:
+        zone = container.get("zone", "Unknown")
+        if zone not in zone_stats:
+            zone_stats[zone] = {
+                "containerCount": 0,
+                "totalVolume": 0,
+                "usedVolume": 0
+            }
+        
+        zone_stats[zone]["containerCount"] += 1
+        zone_stats[zone]["totalVolume"] += container_stats[container["containerId"]]["totalVolume"]
+        zone_stats[zone]["usedVolume"] += container_stats[container["containerId"]]["usedVolume"]
+    
+    # Calculate utilization for each zone
+    for zone, stats in zone_stats.items():
+        stats["utilizationPercentage"] = round((stats["usedVolume"] / stats["totalVolume"]) * 100, 2) if stats["totalVolume"] > 0 else 0
+    
+    return {
+        "success": True,
+        "containerStats": container_stats,
+        "zoneStats": zone_stats
+    }
+
+@app.post("/api/rearrange")
+async def rearrange_items(
+    items_col: Collection = Depends(get_items_collection),
+    containers_col: Collection = Depends(get_containers_collection)
+):
+    """Rearrange items to optimize storage"""
+    # Get all items and containers
+    items = list(items_col.find({}))
+    containers = list(containers_col.find({}))
+    
+    # Create container objects
+    container_objs = [Container(**{
+        "containerId": c["containerId"],
+        "zone": c.get("zone", "general"),
+        "width": c["width"],
+        "depth": c["depth"],
+        "height": c["height"]
+    }) for c in containers]
+    
+    # Create item objects (only non-waste items)
+    item_objs = []
+    for item in items:
+        if item.get("isWaste", False):
+            continue
+            
+        item_obj = Item(
+            itemId=item["itemId"],
+            name=item.get("name", "Unknown"),
+            width=item.get("width", 1),
+            depth=item.get("depth", 1),
+            height=item.get("height", 1),
+            mass=item.get("mass", 1),
+            priority=item.get("priority", 50),
+            expiryDate=item.get("expiryDate"),
+            usageLimit=item.get("usageLimit"),
+            preferredZone=item.get("preferredZone", "general")
+        )
+        item_objs.append(item_obj)
+    
+    # Call placement algorithm
+    placement_request = PlacementRequest(items=item_objs, containers=container_objs)
+    placement_result = await placement_recommendation(placement_request, items_col, containers_col)
+    
+    return placement_result
+
+@app.post("/api/debug/reset")
+async def reset_database(
+    api_key: str = Query(..., description="Admin API key to authorize reset"),
+    db=Depends(get_db)
+):
+    """Reset the database (development only)"""
+    # Validate API key (in production, use a secure environment variable)
+    if api_key != "dev-reset-key-2023":
+        raise HTTPException(status_code=403, detail="Invalid API key")
+    
+    # Clear collections
+    db["items"].delete_many({})
+    db["containers"].delete_many({})
+    db["logs"].delete_many({})
+    
+    return {"success": True, "message": "Database reset complete"}
+
 # ---------------------------- Main Entry Point ----------------------------
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", 8000))
-    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
