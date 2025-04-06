@@ -30,7 +30,7 @@ MONGO_PASSWORD = os.getenv("MONGO_PASSWORD")
 MONGO_DB = os.getenv("MONGO_DB")
 
 # ✅ Connect to MongoDB Atlas
-uri = f"mongodb+srv://{MONGO_USERNAME}:{MONGO_PASSWORD}@cluster0.38cb2.mongodb.net/{MONGO_DB}?retryWrites=true&w=majority"
+uri = f"mongodb+srv://{MONGODB_USERNAME}:{MONGO_PASSWORD}@cluster0.38cb2.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
 client = MongoClient(uri, tlsCAFile=certifi.where())
 db = client[MONGO_DB]
 cargo_collection = db["cargo"]
