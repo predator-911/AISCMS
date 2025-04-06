@@ -25,10 +25,18 @@ logging.basicConfig(
 logger = logging.getLogger("space-cargo")
 
 # MongoDB Configuration
-MONGODB_USERNAME = os.getenv("MONGODB_USERNAME")  # Default for dev
-MONGO_PASSWORD = os.getenv("MONGO_PASSWORD")  # Default for dev
-MONGO_DB = os.getenv("MONGO_DB")  # Default for dev
-MONGO_URI = f"mongodb+srv://{MONGODB_USERNAME}:{MONGO_PASSWORD}@cluster0.38cb2.mongodb.net/{MONGO_DB}?retryWrites=true&w=majority"
+MONGO_USERNAME = os.getenv("MONGO_USERNAME")
+MONGO_PASSWORD = os.getenv("MONGO_PASSWORD")
+MONGO_DB = os.getenv("MONGO_DB")
+
+# ✅ Connect to MongoDB Atlas
+uri = f"mongodb+srv://{MONGO_USERNAME}:{MONGO_PASSWORD}@cluster0.38cb2.mongodb.net/{MONGO_DB}?retryWrites=true&w=majority"
+client = MongoClient(uri, tlsCAFile=certifi.where())
+db = client[MONGO_DB]
+cargo_collection = db["cargo"]
+log_collection = db["logs"]
+storage_containers = db["storage_containers"]
+items_col = db["items"]  # Added missing collection
 
 # Time management
 CURRENT_TIME = datetime.now().isoformat()
