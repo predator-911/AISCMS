@@ -25,10 +25,10 @@ logging.basicConfig(
 logger = logging.getLogger("space-cargo")
 
 # MongoDB Configuration
-MONGODB_USERNAME = os.getenv("MONGODB_USERNAME", "user")  # Default for dev
-MONGO_PASSWORD = os.getenv("MONGO_PASSWORD", "password")  # Default for dev
+MONGODB_USERNAME = os.getenv("MONGODB_USERNAME")  # Default for dev
+MONGO_PASSWORD = os.getenv("MONGO_PASSWORD")  # Default for dev
 MONGO_DB = os.getenv("MONGO_DB")  # Default for dev
-MONGO_URI = os.getenv("MONGO_URI", f"mongodb+srv://{MONGODB_USERNAME}:{MONGO_PASSWORD}@cluster0.38cb2.mongodb.net/{MONGO_DB}?retryWrites=true&w=majority")
+MONGO_URI = f"mongodb+srv://{MONGODB_USERNAME}:{MONGO_PASSWORD}@cluster0.38cb2.mongodb.net/{MONGO_DB}?retryWrites=true&w=majority"
 
 # Time management
 CURRENT_TIME = datetime.now().isoformat()
