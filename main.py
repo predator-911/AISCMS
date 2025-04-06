@@ -25,7 +25,7 @@ logging.basicConfig(
 logger = logging.getLogger("space-cargo")
 
 # MongoDB Configuration
-MONGO_USERNAME = os.getenv("MONGO_USERNAME")
+MONGODB_USERNAME = os.getenv("MONGODB_USERNAME")
 MONGO_PASSWORD = os.getenv("MONGO_PASSWORD")
 MONGO_DB = os.getenv("MONGO_DB")
 
