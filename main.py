@@ -218,7 +218,7 @@ class GuillotineBin:
 
 # ---------------------------- Database Setup ----------------------------
 def get_db():
-    client = MongoClient(MONGO_URI, tlsCAFile=certifi.where())
+    client = MongoClient(uri, tlsCAFile=certifi.where())
     try:
         db = client[MONGO_DB]
         return db
